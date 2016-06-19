@@ -1,0 +1,9 @@
+[package]
+name = "libpart"
+version = "0.1.0"
+authors = ["Stephan Henrichs <stiepen22@gmx.de>"]
+
+[dependencies]
+checksum = "0.2.0"
+byteorder = "0.5.3"
+uuid = "0.2.2"
