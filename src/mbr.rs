@@ -32,6 +32,15 @@ impl MBR {
         })
     }
 
+    pub fn write_mbr<W: Write + Seek>(&self, read: &mut W) -> IOResult<()> {
+        try!(write.seek(SeekFrom::Start(0)));
+        try!(write.write(self.bootloader));
+        for part in &self.partitions {
+            try!(part.write(write));
+        }
+        try!(write.write_u16::<BigEndian>(0x55AA));
+    }
+
     pub fn partitions(&self) -> &[Option<PartitionEntry>] {
         &self.partitions
     }
@@ -65,31 +74,17 @@ impl fmt::Debug for MBR {
 #[derive(Default, Debug, Clone, Copy)]
 pub struct PartitionEntry {
     pub bootable: bool,
-    head_start: u8,
-    sector_start: u8,
-    cylinder_start: u16,
     pub system_id: u8,
-    head_end: u8,
-    sector_end: u8,
-    cylinder_end: u16,
     pub start_lba: u32,
-    pub sector_count: u32
+    pub sector_count: u32,
 }
 
 impl PartitionEntry {
     fn load<R: Read + Seek>(read: &mut R) -> IOResult<Option<PartitionEntry>> {
         let boot = try!(read.read_u8()) == 0x80;
-        let head_start = try!(read.read_u8());
-        let mut sector_start = try!(read.read_u8());
-        let mut cylinder_start = try!(read.read_u8()) as u16;
-        cylinder_start |= (sector_start as u16 & 0x00C0) << 2;
-        sector_start &= 0x3F;
+        try!(read.seek(SeekFrom::Current(3))); // Skip CHS
         let system_id = try!(read.read_u8());
-        let head_end = try!(read.read_u8());
-        let mut sector_end = try!(read.read_u8());
-        let mut cylinder_end = try!(read.read_u8()) as u16;
-        cylinder_end |= (sector_end as u16 & 0x00C0) << 2;
-        sector_end &= 0x3F;
+        try!(read.seek(SeekFrom::Current(3))); // Skip CHS
         let start_lba = try!(read.read_u32::<LittleEndian>());
         let sector_count = try!(read.read_u32::<LittleEndian>());
 
@@ -110,4 +105,41 @@ impl PartitionEntry {
             Ok(None)
         }
     }
+    
+    fn write<W: Write + Seek>(&self, write: &mut W) -> IOResult<()> {
+
+        if self.bootable {
+            try!(write.write_u8(0x80));
+        } else {
+            try!(write.write_u8(0x00));
+        }
+
+        let mut chs = [3; 0u8];
+        offset_to_chs(self.start_lba, &mut chs);
+        try!(write.write(&chs));
+        try!(write.write_u8(self.system_id));
+
+        offset_to_chs(self.sector_count + self.start_lba - 1, &mut chs);
+        try!(write.write(&chs));
+
+        try!(write.write_u32::<LittleEndian>(self.start_lba));
+        try!(write.write_u32::<LittleEndian>(self.sector_count));
+
+    }
+
+    fn offset_to_chs(offset: u32, buf: &mut [u8]) {
+
+        let c = offset % 1024;
+        let offset = offset / 1024;
+
+        let h = offset % 256;
+        let offset = offset / 256;
+
+        let s = cmp::max(offset, 63);
+
+        buf[0] = h;
+        buf[1] = s | ((c & 0x0300) >> 2);
+        buf[2] = (c & 0xFF) as u8;
+    }
+
 }
