@@ -39,6 +39,10 @@ impl MBR {
     pub fn partition_count(&self) -> u8 {
         self.partitions.iter().filter(|p| p.is_some()).count() as u8
     }
+
+    pub fn has_gpt(&self) -> bool {
+        self.partitions.iter().any(|p| p.system_id == 0xFF)
+    }
 }
 
 impl Default for MBR {
