@@ -1,8 +1,8 @@
 extern crate byteorder;
 
-use self::byteorder::{ReadBytesExt, LittleEndian};
-use std::io::{Result as IOResult, Read, Seek, SeekFrom};
-use std::fmt;
+use self::byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian, BigEndian};
+use std::io::{Result as IOResult, Read, Seek, SeekFrom, Write};
+use std::{fmt, cmp};
 
 pub struct MBR {
     bootloader: [u8; 446],
@@ -32,13 +32,17 @@ impl MBR {
         })
     }
 
-    pub fn write_mbr<W: Write + Seek>(&self, read: &mut W) -> IOResult<()> {
+    pub fn write_mbr<W: Write + Seek>(&self, write: &mut W) -> IOResult<()> {
         try!(write.seek(SeekFrom::Start(0)));
-        try!(write.write(self.bootloader));
-        for part in &self.partitions {
-            try!(part.write(write));
+        try!(write.write(&self.bootloader));
+        for p in &self.partitions {
+            match p {
+                &Some(ref part) => try!(part.write(write)),
+                &None => try!(PartitionEntry::default().write(write))
+            }
         }
         try!(write.write_u16::<BigEndian>(0x55AA));
+        Ok(())
     }
 
     pub fn partitions(&self) -> &[Option<PartitionEntry>] {
@@ -50,7 +54,7 @@ impl MBR {
     }
 
     pub fn has_gpt(&self) -> bool {
-        self.partitions.iter().any(|p| p.system_id == 0xFF)
+        self.partitions.iter().any(|p| p.is_some() && p.unwrap().system_id == 0xFF)
     }
 }
 
@@ -91,13 +95,7 @@ impl PartitionEntry {
         if system_id != 0 {
             Ok(Some(PartitionEntry {
                 bootable: boot,
-                head_start: head_start,
-                sector_start: sector_start,
-                cylinder_start: cylinder_start,
                 system_id: system_id,
-                head_end: head_end,
-                sector_end: sector_end,
-                cylinder_end: cylinder_end,
                 start_lba: start_lba,
                 sector_count: sector_count
             }))
@@ -114,7 +112,7 @@ impl PartitionEntry {
             try!(write.write_u8(0x00));
         }
 
-        let mut chs = [3; 0u8];
+        let mut chs = [0u8; 3];
         offset_to_chs(self.start_lba, &mut chs);
         try!(write.write(&chs));
         try!(write.write_u8(self.system_id));
@@ -125,21 +123,24 @@ impl PartitionEntry {
         try!(write.write_u32::<LittleEndian>(self.start_lba));
         try!(write.write_u32::<LittleEndian>(self.sector_count));
 
+        Ok(())
+
     }
 
-    fn offset_to_chs(offset: u32, buf: &mut [u8]) {
 
-        let c = offset % 1024;
-        let offset = offset / 1024;
+}
 
-        let h = offset % 256;
-        let offset = offset / 256;
+fn offset_to_chs(offset: u32, buf: &mut [u8]) {
 
-        let s = cmp::max(offset, 63);
+    let c = offset % 1024;
+    let offset = offset / 1024;
 
-        buf[0] = h;
-        buf[1] = s | ((c & 0x0300) >> 2);
-        buf[2] = (c & 0xFF) as u8;
-    }
+    let h = offset % 256;
+    let offset = offset / 256;
 
+    let s = cmp::max(offset, 63);
+
+    buf[0] = h as u8;
+    buf[1] = (s | ((c & 0x0300) >> 2)) as u8;
+    buf[2] = (c & 0xFF) as u8;
 }

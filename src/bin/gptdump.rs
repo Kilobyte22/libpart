@@ -16,8 +16,6 @@ fn main() {
 
     let mut file = File::open(file_name).unwrap();
 
-    mbr::ignore(&mut file, 512);
-
     let table = gpt::GPTTable::load(&mut file, &gpt::GPTOptions::default()).unwrap();
 
     println!("You have {} partition(s)", table.part_count());
