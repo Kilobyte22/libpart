@@ -8,26 +8,10 @@ use self::checksum::crc32::Crc32 as CRC32;
 use self::uuid::{Uuid as UUID, ParseError as UUIDError};
 use self::byteorder::{WriteBytesExt, ReadBytesExt, LittleEndian, ByteOrder};
 use std::io::{Result as IOResult, Write, Read, Error as IOError, Seek, SeekFrom, Cursor};
+use std::error::Error;
+use std::fmt;
 
 const GPT_MAGIC: [u8; 8] = [0x45, 0x46, 0x49, 0x20, 0x50, 0x41, 0x52, 0x54];
-
-macro_rules! iotry {
-    ($thing:expr) => {
-        match $thing {
-            Ok(x) => x,
-            Err(x) => return Err(GPTError::new(ErrorType::IOError(x)))
-        }
-    }
-}
-
-macro_rules! uuidtry {
-    ($thing:expr) => {
-        match $thing {
-            Ok(x) => x,
-            Err(x) => return Err(GPTError::new(ErrorType::UUIDError(x)))
-        }
-    }
-}
 
 pub struct GPTOptions {
     block_size: u16,
@@ -93,14 +77,58 @@ pub enum ErrorType {
 
 #[derive(Debug)]
 pub struct GPTError {
-    error_type: ErrorType
+    error_type: ErrorType,
+    desc: String
 }
 
 impl GPTError {
     fn new(t: ErrorType) -> GPTError {
+        let desc = String::from(match &t {
+            &ErrorType::NoTable => String::from("No GPT found"),
+            &ErrorType::ChecksumError => String::from("GPT corrupt"),
+            &ErrorType::InvalidVersion => String::from("Invalid GPT Version"),
+            &ErrorType::InvalidHeader => String::from("Invalid GPT Header"),
+            &ErrorType::UTF16Error => String::from("Encoding Error in GPT: Invalid UTF-16"),
+            &ErrorType::InvalidID => String::from("Invalid ID"),
+            &ErrorType::IOError(ref e) => format!("IO Error while processing GPT: {}", e.description()),
+            &ErrorType::UUIDError(ref e) => format!("Invalid UUID: {}", e.description())
+        });
         GPTError {
-            error_type: t
+            error_type: t,
+            desc: desc
         }
+    }
+}
+
+impl From<IOError> for GPTError {
+    fn from(err: IOError) -> GPTError {
+        GPTError::new(ErrorType::IOError(err))
+    }
+}
+
+impl From<UUIDError> for GPTError {
+    fn from(err: UUIDError) -> GPTError {
+        GPTError::new(ErrorType::UUIDError(err))
+    }
+}
+
+impl Error for GPTError {
+    fn description(&self) -> &str {
+        &self.desc
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match &self.error_type {
+            &ErrorType::IOError(ref e) => Some(e),
+            &ErrorType::UUIDError(ref e) => Some(e),
+            _ => None
+        }
+    }
+}
+
+impl fmt::Display for GPTError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
     }
 }
 
@@ -112,22 +140,22 @@ impl GPTTable {
         let block_size = options.block_size;
 
         // Actually go to the start of the GPT
-        iotry!(read.seek(SeekFrom::Start(block_size as u64)));
+        try!(read.seek(SeekFrom::Start(block_size as u64)));
 
         let mut buf = [0u8; 8];
-        iotry!(read.read(&mut buf));
+        try!(read.read(&mut buf));
         if buf != GPT_MAGIC {
             return Err(GPTError::new(ErrorType::NoTable));
         }
 
         let mut buf = [0u8; 4];
-        iotry!(read.read(&mut buf));
+        try!(read.read(&mut buf));
         if buf != [0x00, 0x00, 0x01, 0x00] {
             println!("Invalid header version");
             return Err(GPTError::new(ErrorType::InvalidVersion));
         }
 
-        let hlen = iotry!(read.read_u32::<LittleEndian>());
+        let hlen = try!(read.read_u32::<LittleEndian>());
 
         if hlen != 92 {
             println!("Header length is not 92");
@@ -135,44 +163,44 @@ impl GPTTable {
         }
 
         // FIXME: ignoring checksum for now
-        let crc = iotry!(read.read_u32::<LittleEndian>());
+        let crc = try!(read.read_u32::<LittleEndian>());
 
         // Reserved. Let's ignore it.
-        iotry!(read.read_i32::<LittleEndian>());
+        try!(read.read_i32::<LittleEndian>());
         
-        let mypos = Block(iotry!(read.read_u64::<LittleEndian>()));
+        let mypos = Block(try!(read.read_u64::<LittleEndian>()));
 
-        let otherpos = Block(iotry!(read.read_u64::<LittleEndian>()));
+        let otherpos = Block(try!(read.read_u64::<LittleEndian>()));
 
-        let first_usable = Block(iotry!(read.read_u64::<LittleEndian>()));
+        let first_usable = Block(try!(read.read_u64::<LittleEndian>()));
 
-        let last_usable = Block(iotry!(read.read_u64::<LittleEndian>()));
+        let last_usable = Block(try!(read.read_u64::<LittleEndian>()));
 
         let uuid = try!(read_uuid(read));
 
-        let part_start = Block(iotry!(read.read_u64::<LittleEndian>()));
+        let part_start = Block(try!(read.read_u64::<LittleEndian>()));
         if part_start != Block(2) {
             // In primary GPT this is ALWAYS 2
             println!("Invalid start of partition table");
             return Err(GPTError::new(ErrorType::InvalidHeader));
         }
 
-        let part_count = iotry!(read.read_u32::<LittleEndian>());
+        let part_count = try!(read.read_u32::<LittleEndian>());
 
-        let part_size = iotry!(read.read_u32::<LittleEndian>());
+        let part_size = try!(read.read_u32::<LittleEndian>());
         if part_size != 128 {
             println!("Invalid partition table entry size");
             return Err(GPTError::new(ErrorType::InvalidHeader));
         }
 
-        let part_checksum = iotry!(read.read_u32::<LittleEndian>());
+        let part_checksum = try!(read.read_u32::<LittleEndian>());
 
         if !options.ignore_csum {
             // Time to verify checksum
-            iotry!(read.seek(SeekFrom::Start(block_size as u64)));
+            try!(read.seek(SeekFrom::Start(block_size as u64)));
             let mut buf = Vec::new();
             buf.resize(hlen as usize, 0u8);
-            iotry!(read.read(&mut buf));
+            try!(read.read(&mut buf));
             // Zero out checksum field
             cp(&[0x00, 0x00, 0x00, 0x00], &mut buf[16..20]);
 
@@ -183,11 +211,11 @@ impl GPTTable {
             }
 
             // Time to checksum the partition table
-            iotry!(read.seek(SeekFrom::Start(part_start.to_bytes(block_size))));
+            try!(read.seek(SeekFrom::Start(part_start.to_bytes(block_size))));
             
             let mut buf = Vec::new();
             buf.resize(part_size as usize * part_count as usize, 0u8);
-            iotry!(read.read(&mut buf));
+            try!(read.read(&mut buf));
 
             let csum = CRC32::new().checksum(&buf);
             if csum != part_checksum {
@@ -197,7 +225,7 @@ impl GPTTable {
 
         // Okay, Lets read the actual partition table
         
-        iotry!(read.seek(SeekFrom::Start(part_start.to_bytes(block_size))));
+        try!(read.seek(SeekFrom::Start(part_start.to_bytes(block_size))));
 
         // Stuff might break on 64 bit once we get huuuuuge hard disks.
         // But eh, 32 bit will be gone by then anyways
@@ -206,9 +234,9 @@ impl GPTTable {
         for _ in 0..part_count {
             let part_type = try!(read_uuid(read));
             let part_id = try!(read_uuid(read));
-            let part_start = Block(iotry!(read.read_u64::<LittleEndian>()));
-            let part_end = Block(iotry!(read.read_u64::<LittleEndian>()));
-            let part_flags = iotry!(read.read_u64::<LittleEndian>());
+            let part_start = Block(try!(read.read_u64::<LittleEndian>()));
+            let part_end = Block(try!(read.read_u64::<LittleEndian>()));
+            let part_flags = try!(read.read_u64::<LittleEndian>());
             let part_label = try!(read_utf16_le(read, options.ignore_utf16_errors));
 
 
@@ -252,28 +280,28 @@ impl GPTTable {
         let mut cur = Cursor::new(gpt);
 
         // Magic Bytes
-        iotry!(cur.write(&GPT_MAGIC));
+        try!(cur.write(&GPT_MAGIC));
         // Revision
-        iotry!(cur.write(&[0x00, 0x00, 0x01, 0x00]));
+        try!(cur.write(&[0x00, 0x00, 0x01, 0x00]));
         // Header size
-        iotry!(cur.write_u32::<LittleEndian>(92));
+        try!(cur.write_u32::<LittleEndian>(92));
         // CRC32 sum - for now 0
-        iotry!(cur.write_u32::<LittleEndian>(0));
+        try!(cur.write_u32::<LittleEndian>(0));
         // Reserved
-        iotry!(cur.write_i32::<LittleEndian>(0));
+        try!(cur.write_i32::<LittleEndian>(0));
 
         let mypos = if primary {
-            iotry!(cur.write_u64::<LittleEndian>(self.primary_gpt.0));
-            iotry!(cur.write_u64::<LittleEndian>(self.backup_gpt.0));
+            try!(cur.write_u64::<LittleEndian>(self.primary_gpt.0));
+            try!(cur.write_u64::<LittleEndian>(self.backup_gpt.0));
             self.primary_gpt
         } else {
-            iotry!(cur.write_u64::<LittleEndian>(self.backup_gpt.0));
-            iotry!(cur.write_u64::<LittleEndian>(self.primary_gpt.0));
+            try!(cur.write_u64::<LittleEndian>(self.backup_gpt.0));
+            try!(cur.write_u64::<LittleEndian>(self.primary_gpt.0));
             self.backup_gpt
         };
 
-        iotry!(cur.write_u64::<LittleEndian>(self.first_usable.0));
-        iotry!(cur.write_u64::<LittleEndian>(self.last_usable.0));
+        try!(cur.write_u64::<LittleEndian>(self.first_usable.0));
+        try!(cur.write_u64::<LittleEndian>(self.last_usable.0));
 
         try!(write_uuid(&mut cur, self.gpt_uuid));
 
@@ -283,11 +311,11 @@ impl GPTTable {
             self.backup_gpt - self.ptable_len(self.partitions.len() as u64, options)
         };
 
-        iotry!(cur.write_u64::<LittleEndian>(part_start.0));
+        try!(cur.write_u64::<LittleEndian>(part_start.0));
 
-        iotry!(cur.write_u32::<LittleEndian>(self.partitions.len() as u32));
+        try!(cur.write_u32::<LittleEndian>(self.partitions.len() as u32));
 
-        iotry!(cur.write_u32::<LittleEndian>(128));
+        try!(cur.write_u32::<LittleEndian>(128));
 
 
         // Write part table
@@ -306,38 +334,38 @@ impl GPTTable {
 
             try!(write_uuid(&mut pcur, p.part_type));
             try!(write_uuid(&mut pcur, p.part_id));
-            iotry!(pcur.write_u64::<LittleEndian>(p.start.0));
-            iotry!(pcur.write_u64::<LittleEndian>(p.end.0));
-            iotry!(pcur.write_u64::<LittleEndian>(p.flags));
+            try!(pcur.write_u64::<LittleEndian>(p.start.0));
+            try!(pcur.write_u64::<LittleEndian>(p.end.0));
+            try!(pcur.write_u64::<LittleEndian>(p.flags));
             try!(write_utf16_le(&mut pcur, &p.name));
         }
 
         let part_crc = CRC32::new().checksum(pcur.get_ref());
 
         // Write CRC of partition table
-        iotry!(cur.write_u32::<LittleEndian>(part_crc));
+        try!(cur.write_u32::<LittleEndian>(part_crc));
 
         // Now we actually write the table to disk
-        iotry!(write.seek(SeekFrom::Start(part_start.to_bytes(options.block_size))));
-        iotry!(write.write(pcur.get_ref()));
+        try!(write.seek(SeekFrom::Start(part_start.to_bytes(options.block_size))));
+        try!(write.write(pcur.get_ref()));
 
-        iotry!(cur.seek(SeekFrom::Start(16)));
+        try!(cur.seek(SeekFrom::Start(16)));
 
         let hdr_crc = {
             let buf = cur.get_ref();
             CRC32::new().checksum(&buf)
         };
-        iotry!(cur.write_u32::<LittleEndian>(hdr_crc));
+        try!(cur.write_u32::<LittleEndian>(hdr_crc));
 
         // Fully zero the sector for the actual GPT
         let mut buf = Vec::new();
         buf.resize(options.block_size as usize, 0u8);
-        iotry!(write.seek(SeekFrom::Start(mypos.to_bytes(options.block_size))));
-        write.write(&buf);
+        try!(write.seek(SeekFrom::Start(mypos.to_bytes(options.block_size))));
+        try!(write.write(&buf));
 
         // Write the actual GPT
-        iotry!(write.seek(SeekFrom::Start(mypos.to_bytes(options.block_size))));
-        iotry!(write.write(cur.get_ref()));
+        try!(write.seek(SeekFrom::Start(mypos.to_bytes(options.block_size))));
+        try!(write.write(cur.get_ref()));
 
         Ok(())
 
@@ -385,7 +413,7 @@ fn write_utf16_le(write: &mut Write, s: &str) -> Result<(), GPTError> {
     let buf = s.encode_utf16().take(36).collect::<Vec<_>>();
     let mut buf2 = [0u16; 36];
     cp(&buf, &mut buf2);
-    iotry!(write_u16_buf::<LittleEndian>(write, &buf2));
+    try!(write_u16_buf::<LittleEndian>(write, &buf2));
     Ok(())
 }
 
@@ -398,7 +426,7 @@ fn write_u16_buf<T: ByteOrder>(write: &mut Write, buf: &[u16]) -> IOResult<()> {
 
 fn read_utf16_le(read: &mut Read, ignore_err: bool) -> Result<String, GPTError> {
     let mut buf = [0u16; 36];
-    iotry!(read_u16_buf::<LittleEndian>(read, &mut buf));
+    try!(read_u16_buf::<LittleEndian>(read, &mut buf));
     let ret = match String::from_utf16(&buf) {
         Ok(x) => x,
         Err(_) => if ignore_err {
@@ -424,14 +452,14 @@ fn read_u16_buf<T: ByteOrder>(read: &mut Read, buf: &mut[u16]) -> IOResult<()> {
 fn read_uuid(read: &mut Read) -> Result<UUID, GPTError> {
     let mut buf = [0u8; 16];
     let mut buf_endian_ffs = [0u8; 16];
-    iotry!(read.read(&mut buf));
+    try!(read.read(&mut buf));
     cp(&buf, &mut buf_endian_ffs);
     // Lets fix endianness
     swap_endian(&buf[0..4], &mut buf_endian_ffs[0..4]);
     swap_endian(&buf[4..6], &mut buf_endian_ffs[4..6]);
     swap_endian(&buf[6..8], &mut buf_endian_ffs[6..8]);
 
-    Ok(uuidtry!(UUID::from_bytes(&buf_endian_ffs)))
+    Ok(try!(UUID::from_bytes(&buf_endian_ffs)))
 }
 
 fn write_uuid(write: &mut Write, uuid: UUID) -> Result<(), GPTError> {
@@ -442,7 +470,7 @@ fn write_uuid(write: &mut Write, uuid: UUID) -> Result<(), GPTError> {
     swap_endian(&buf[4..6], &mut buf_out[4..6]);
     swap_endian(&buf[6..8], &mut buf_out[6..8]);
 
-    iotry!(write.write(&buf_out));
+    try!(write.write(&buf_out));
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 extern crate libpart;
 
-use libpart::{gpt, mbr};
+use libpart::gpt;
 use std::env;
 use std::fs::File;
 

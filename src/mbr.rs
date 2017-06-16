@@ -11,7 +11,7 @@ pub struct MBR {
 }
 
 impl MBR {
-    fn new() -> MBR {
+    pub fn new() -> MBR {
         MBR::default()
     }
 
@@ -70,7 +70,7 @@ impl Default for MBR {
 
 impl fmt::Debug for MBR {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        fmt.debug_struct("MBR").field("bootloader", &"[446 Bytes]").field("partitions", &self.partitions).field("boot_sig", &self.boot_sig).finish();
+        fmt.debug_struct("MBR").field("bootloader", &"[446 Bytes]").field("partitions", &self.partitions).field("boot_sig", &self.boot_sig).finish()?;
         Ok(())
     }
 }
