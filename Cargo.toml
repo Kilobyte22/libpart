@@ -3,7 +3,7 @@ name = "libpart"
 version = "0.1.1"
 authors = ["Stephan Henrichs <stiepen22@gmx.de>"]
 description = "Library for manipulating partition tables"
-license = "lgpl-3"
+license = "LGPL-3.0"
 repository = "https://github.com/Kilobyte22/libpart"
 
 [dependencies]
