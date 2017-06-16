@@ -3,4 +3,4 @@ pub mod gpt;
 pub mod mbr;
 
 pub use mbr::MBR;
-pub use gpt::GPT
+pub use gpt::GPT;
