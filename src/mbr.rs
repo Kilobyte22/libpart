@@ -4,6 +4,7 @@ use self::byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian, BigEndian};
 use std::io::{Result as IOResult, Read, Seek, SeekFrom, Write};
 use std::{fmt, cmp};
 
+/// A structure representing a Master Boot Record
 pub struct MBR {
     bootloader: [u8; 446],
     partitions: [Option<PartitionEntry>; 4],
@@ -11,10 +12,12 @@ pub struct MBR {
 }
 
 impl MBR {
+    /// Initialize a new empty MBR
     pub fn new() -> MBR {
         MBR::default()
     }
 
+    /// Load a MBR from stream
     pub fn load<R: Read + Seek>(read: &mut R) -> IOResult<MBR> {
         try!(read.seek(SeekFrom::Start(0)));
         let mut stage0 = [0u8; 446];
@@ -32,6 +35,7 @@ impl MBR {
         })
     }
 
+    /// Load a GPT from stream
     pub fn write_mbr<W: Write + Seek>(&self, write: &mut W) -> IOResult<()> {
         try!(write.seek(SeekFrom::Start(0)));
         try!(write.write(&self.bootloader));
@@ -45,14 +49,26 @@ impl MBR {
         Ok(())
     }
 
+    /// Get a list of all primary partitions
     pub fn partitions(&self) -> &[Option<PartitionEntry>] {
         &self.partitions
     }
 
+    /// Count all primary partitions. May be changed in the future to also include logical
+    /// partitions, once they are supported by this library
     pub fn partition_count(&self) -> u8 {
         self.partitions.iter().filter(|p| p.is_some()).count() as u8
     }
 
+    /// Count all primary partitions. Does include the host partition for logical partitions
+    pub fn primary_partition_count(&self) -> u8 {
+        self.partition_count()
+    }
+
+    /// Checks if this MBR is followed by a GPT.
+    ///
+    /// More precisely: it checks if there is a protective partition to cover the GPT structures.
+    /// To check if there is an actual GPT, please use GPT::load() and check for a GPTError::NoTable Error
     pub fn has_gpt(&self) -> bool {
         self.partitions.iter().any(|p| p.is_some() && p.unwrap().system_id == 0xFF)
     }
@@ -77,9 +93,13 @@ impl fmt::Debug for MBR {
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct PartitionEntry {
+    /// Is this partition marked as bootable
     pub bootable: bool,
+    /// The partition type
     pub system_id: u8,
+    /// the LBA at which the partition starts
     pub start_lba: u32,
+    /// How long the partition is in blocks
     pub sector_count: u32,
 }
 

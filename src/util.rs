@@ -4,6 +4,7 @@ use std::ops::{Add, Sub};
 pub struct Block(pub u64);
 
 impl Block {
+    /// Gets the byte offset of a block
     pub fn to_bytes(&self, sector_size: u16) -> u64 {
         let sector_size = sector_size as u64;
         self.0 * sector_size
@@ -20,6 +21,7 @@ impl Block {
         }
     }
 
+    /// Gets the Block as well as the offset within the block of a given offset
     pub fn from_bytes_offset(bytes: u64, sector_size: u16) -> (Block, u16) {
         let sector_size = sector_size as u64;
         (Block(bytes / sector_size), (bytes % sector_size) as u16)

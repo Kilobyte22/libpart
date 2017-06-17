@@ -13,9 +13,13 @@ use std::fmt;
 
 const GPT_MAGIC: [u8; 8] = [0x45, 0x46, 0x49, 0x20, 0x50, 0x41, 0x52, 0x54];
 
+/// Options for parsing GPT
 pub struct GPTOptions {
+    /// The block size to use. Defaults to 512
     block_size: u16,
+    /// Make checksum errors non-fatal.
     ignore_csum: bool,
+    /// Make UTF-16 error non-fatal
     ignore_utf16_errors: bool
 }
 
@@ -42,15 +46,22 @@ pub struct GPTTable {
 
 #[derive(Debug)]
 pub struct PartitionEntry {
+    /// The type UUID of the partition
     pub part_type: UUID,
+    /// The PARTUUID of the partition
     pub part_id: UUID,
+    /// The first block of the partition
     pub start: Block,
+    /// The last block of the partition
     pub end: Block,
+    /// The flags of the partition
     pub flags: u64,
+    /// The human readable name of the partition. At most 19 chars.
     pub name: String
 }
 
 impl PartitionEntry {
+    /// Creates a new empty partition entry
     fn empty() -> PartitionEntry {
         PartitionEntry {
             part_type: UUID::nil(),
@@ -65,12 +76,19 @@ impl PartitionEntry {
 
 #[derive(Debug)]
 pub enum ErrorType {
+    /// There was no GPT found
     NoTable,
+    /// The checksum of both the primary and the backup GPT was incorrect
     ChecksumError,
+    /// The Version of the GPT is incompatible with this implementation
     InvalidVersion,
+    /// The header in itself is invalid
     InvalidHeader,
+    /// During parsing or writing a GPT an IO Error occured
     IOError(IOError),
+    /// One of the UUIDs is not valid
     UUIDError(UUIDError),
+    /// One of the strings is invalid UTF-16
     UTF16Error,
     InvalidID
 }
@@ -134,7 +152,7 @@ impl fmt::Display for GPTError {
 
 impl GPTTable {
 
-
+    /// Load a GPT from file or stream
     pub fn load<T: Read + Seek>(read: &mut T, options: &GPTOptions) -> Result<GPTTable, GPTError> {
 
         let block_size = options.block_size;
@@ -266,6 +284,7 @@ impl GPTTable {
         })
     }
 
+    /// Write a GPT to file. will write both primary and backup
     pub fn write<W: Write + Seek>(&self, write: &mut W, options: &GPTOptions) -> Result<(), GPTError> {
         try!(self.write_gpt(write, options, true));
         try!(self.write_gpt(write, options, false));
@@ -375,14 +394,23 @@ impl GPTTable {
         Block::from_bytes(pcount * 128, options.block_size).expect("Partition count must be devidable by 4")
     }
 
+    /// Gets the amount of partitions that are in use.
+    ///
+    /// Please note that if there is an empty part inbetween, it is not counted. So say
+    /// you have /dev/sda1, /dev/sda2 and /dev/sda4, but no /dev/sda3, this would still return 3
     pub fn part_count(&self) -> u64 {
         self.partitions.iter().filter(|p| p.is_some()).count() as u64
     }
 
+    /// Gives you readonly access to all partitions
     pub fn partitions(&self) -> &[Option<PartitionEntry>] {
         &self.partitions
     }
 
+    /// Get the first free partition ID
+    ///
+    /// Returns Some(id) if there is still space  
+    /// Returns None if all partition slots are occupied
     pub fn next_id(&self) -> Option<u64> {
         for p in self.partitions.iter().enumerate() {
             if p.1.is_none() {
@@ -392,6 +420,7 @@ impl GPTTable {
         None
     }
 
+    /// Set a partition entry to whatever you specified
     pub fn set_partition(&mut self, id: u64, part: PartitionEntry) -> Result<(), GPTError> {
         if id as usize > self.partitions.len() - 1 {
             return Err(GPTError::new(ErrorType::InvalidID));
@@ -400,6 +429,7 @@ impl GPTTable {
         Ok(())
     }
 
+    /// Mark a partition slot as empty
     pub fn delete_partition(&mut self, id: u64) -> Result<(), GPTError> {
         if id as usize > self.partitions.len() - 1 {
             return Err(GPTError::new(ErrorType::InvalidID));
