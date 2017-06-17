@@ -16,11 +16,11 @@ const GPT_MAGIC: [u8; 8] = [0x45, 0x46, 0x49, 0x20, 0x50, 0x41, 0x52, 0x54];
 /// Options for parsing GPT
 pub struct GPTOptions {
     /// The block size to use. Defaults to 512
-    block_size: u16,
+    pub block_size: u16,
     /// Make checksum errors non-fatal.
-    ignore_csum: bool,
+    pub ignore_csum: bool,
     /// Make UTF-16 error non-fatal
-    ignore_utf16_errors: bool
+    pub ignore_utf16_errors: bool
 }
 
 impl Default for GPTOptions {
