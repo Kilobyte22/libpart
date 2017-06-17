@@ -152,6 +152,18 @@ impl fmt::Display for GPTError {
 
 impl GPTTable {
 
+
+    pub fn exists<T: Read + Seek>(read: &mut T, options: &GPTOptions) -> Result<bool, IOError> {
+        let block_size = options.block_size;
+
+        read.seek(SeekFrom::Start(block_size as u64))?;
+
+        let mut buf = [0u8; 8];
+        try!(read.read(&mut buf));
+
+        Ok(buf == GPT_MAGIC)
+    }
+
     /// Load a GPT from file or stream
     pub fn load<T: Read + Seek>(read: &mut T, options: &GPTOptions) -> Result<GPTTable, GPTError> {
 

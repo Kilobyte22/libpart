@@ -65,13 +65,6 @@ impl MBR {
         self.partition_count()
     }
 
-    /// Checks if this MBR is followed by a GPT.
-    ///
-    /// More precisely: it checks if there is a protective partition to cover the GPT structures.
-    /// To check if there is an actual GPT, please use GPT::load() and check for a GPTError::NoTable Error
-    pub fn has_gpt(&self) -> bool {
-        self.partitions.iter().any(|p| p.is_some() && p.unwrap().system_id == 0xFF)
-    }
 }
 
 impl Default for MBR {

@@ -1,6 +1,6 @@
 [package]
 name = "libpart"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Stephan Henrichs <stiepen22@gmx.de>"]
 description = "Library for manipulating partition tables"
 license = "LGPL-3.0"
