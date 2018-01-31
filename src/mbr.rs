@@ -19,14 +19,14 @@ impl MBR {
 
     /// Load a MBR from stream
     pub fn load<R: Read + Seek>(read: &mut R) -> IOResult<MBR> {
-        try!(read.seek(SeekFrom::Start(0)));
+        read.seek(SeekFrom::Start(0))?;
         let mut stage0 = [0u8; 446];
-        try!(read.read(&mut stage0));
+        read.read(&mut stage0)?;
         let mut parts = [None; 4];
         for i in 0..4 {
-            parts[i] = try!(PartitionEntry::load(read));
+            parts[i] = PartitionEntry::load(read)?;
         }
-        let sig = try!(read.read_u16::<LittleEndian>());
+        let sig = read.read_u16::<LittleEndian>()?;
 
         Ok(MBR {
             bootloader: stage0,
@@ -37,15 +37,15 @@ impl MBR {
 
     /// Load a GPT from stream
     pub fn write_mbr<W: Write + Seek>(&self, write: &mut W) -> IOResult<()> {
-        try!(write.seek(SeekFrom::Start(0)));
-        try!(write.write(&self.bootloader));
+        write.seek(SeekFrom::Start(0))?;
+        write.write(&self.bootloader)?;
         for p in &self.partitions {
             match p {
-                &Some(ref part) => try!(part.write(write)),
-                &None => try!(PartitionEntry::default().write(write))
+                &Some(ref part) => part.write(write)?,
+                &None => PartitionEntry::default().write(write)?
             }
         }
-        try!(write.write_u16::<BigEndian>(0x55AA));
+        write.write_u16::<BigEndian>(0x55AA)?;
         Ok(())
     }
 
@@ -98,19 +98,19 @@ pub struct PartitionEntry {
 
 impl PartitionEntry {
     fn load<R: Read + Seek>(read: &mut R) -> IOResult<Option<PartitionEntry>> {
-        let boot = try!(read.read_u8()) == 0x80;
-        try!(read.seek(SeekFrom::Current(3))); // Skip CHS
-        let system_id = try!(read.read_u8());
-        try!(read.seek(SeekFrom::Current(3))); // Skip CHS
-        let start_lba = try!(read.read_u32::<LittleEndian>());
-        let sector_count = try!(read.read_u32::<LittleEndian>());
+        let boot = read.read_u8()? == 0x80;
+        read.seek(SeekFrom::Current(3))?; // Skip CHS
+        let system_id = read.read_u8()?;
+        read.seek(SeekFrom::Current(3))?; // Skip CHS
+        let start_lba = read.read_u32::<LittleEndian>()?;
+        let sector_count = read.read_u32::<LittleEndian>()?;
 
         if system_id != 0 {
             Ok(Some(PartitionEntry {
                 bootable: boot,
-                system_id: system_id,
-                start_lba: start_lba,
-                sector_count: sector_count
+                system_id,
+                start_lba,
+                sector_count
             }))
         } else {
             Ok(None)
@@ -120,21 +120,21 @@ impl PartitionEntry {
     fn write<W: Write + Seek>(&self, write: &mut W) -> IOResult<()> {
 
         if self.bootable {
-            try!(write.write_u8(0x80));
+            write.write_u8(0x80)?;
         } else {
-            try!(write.write_u8(0x00));
+            write.write_u8(0x00)?;
         }
 
         let mut chs = [0u8; 3];
         offset_to_chs(self.start_lba, &mut chs);
-        try!(write.write(&chs));
-        try!(write.write_u8(self.system_id));
+        write.write(&chs)?;
+        write.write_u8(self.system_id)?;
 
         offset_to_chs(self.sector_count + self.start_lba - 1, &mut chs);
-        try!(write.write(&chs));
+        write.write(&chs)?;
 
-        try!(write.write_u32::<LittleEndian>(self.start_lba));
-        try!(write.write_u32::<LittleEndian>(self.sector_count));
+        write.write_u32::<LittleEndian>(self.start_lba)?;
+        write.write_u32::<LittleEndian>(self.sector_count)?;
 
         Ok(())
 
