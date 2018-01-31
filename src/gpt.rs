@@ -35,12 +35,19 @@ impl Default for GPTOptions {
 
 #[derive(Debug)]
 pub struct GPTTable {
+    /// Location of the Primary GPT
     primary_gpt: Block,
+    /// Location of the Backup GPT
     backup_gpt: Block,
+    /// First usable block for data
     first_usable: Block,
+    /// Last usable block for data
     last_usable: Block,
+    /// The UUID of the GPT
     gpt_uuid: UUID,
+    /// List of partitions
     partitions: Vec<Option<PartitionEntry>>,
+    /// Checksum of data
     checksum: u32
 }
 
@@ -152,6 +159,24 @@ impl fmt::Display for GPTError {
 
 impl GPTTable {
 
+    pub fn new(volume_size: u64, options: &GPTOptions) -> GPTTable {
+        let (block, offset) = Block::from_bytes_offset(volume_size, options.block_size);
+        let last_block = if offset != 0 {
+            block - Block(1)
+        } else {
+            block
+        };
+        let first_usable = Block(1) + GPTTable::ptable_len(128, options);
+        GPTTable {
+            primary_gpt: Block(1),
+            backup_gpt: last_block,
+            first_usable,
+            last_usable: last_block - GPTTable::ptable_len(128, options),
+            gpt_uuid: UUID::new_v4(),
+            partitions: Vec::new(),
+            checksum: 0,
+        }
+    }
 
     pub fn exists<T: Read + Seek>(read: &mut T, options: &GPTOptions) -> Result<bool, IOError> {
         let block_size = options.block_size;
@@ -339,7 +364,7 @@ impl GPTTable {
         let part_start = if primary {
             Block(2)
         } else {
-            self.backup_gpt - self.ptable_len(self.partitions.len() as u64, options)
+            self.backup_gpt - GPTTable::ptable_len(self.partitions.len() as u64, options)
         };
 
         try!(cur.write_u64::<LittleEndian>(part_start.0));
@@ -402,7 +427,7 @@ impl GPTTable {
 
     }
 
-    fn ptable_len(&self, pcount: u64, options: &GPTOptions) -> Block {
+    fn ptable_len(pcount: u64, options: &GPTOptions) -> Block {
         Block::from_bytes(pcount * 128, options.block_size).expect("Partition count must be devidable by 4")
     }
 
