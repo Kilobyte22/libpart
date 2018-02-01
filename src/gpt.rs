@@ -51,7 +51,7 @@ pub struct GPTTable {
     checksum: u32
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PartitionEntry {
     /// The type UUID of the partition
     pub part_type: UUID,
@@ -159,21 +159,23 @@ impl fmt::Display for GPTError {
 
 impl GPTTable {
 
-    pub fn new(volume_size: u64, options: &GPTOptions) -> GPTTable {
+    pub fn new(volume_size: u64, part_count: u64, options: &GPTOptions) -> GPTTable {
         let (block, offset) = Block::from_bytes_offset(volume_size, options.block_size);
         let last_block = if offset != 0 {
             block - Block(1)
         } else {
             block
         };
-        let first_usable = Block(1) + GPTTable::ptable_len(128, options);
+        let first_usable = Block(1) + GPTTable::ptable_len(part_count, options);
+        let mut parts = Vec::with_capacity(part_count as usize);
+        parts.resize(part_count as usize, None);
         GPTTable {
             primary_gpt: Block(1),
             backup_gpt: last_block,
             first_usable,
-            last_usable: last_block - GPTTable::ptable_len(128, options),
+            last_usable: last_block - GPTTable::ptable_len(part_count, options),
             gpt_uuid: UUID::new_v4(),
-            partitions: Vec::new(),
+            partitions: parts,
             checksum: 0,
         }
     }
